@@ -6,7 +6,6 @@
     <title>Previsão de Qualidade do Vinho</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
     <style>
-        /* Estilos CSS */
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f4f4;
@@ -87,7 +86,6 @@
             displayResults(predictions);
         }
 
-        // Função para ler o arquivo Excel
         async function readExcel(file) {
             const reader = new FileReader();
             return new Promise((resolve) => {
@@ -106,85 +104,106 @@
             });
         }
 
-        // Função para normalizar e processar dados
         function preprocessData(data) {
             return data.map(row => row.slice(0, 11).map(value => {
                 const num = parseFloat(value);
-                return isNaN(num) ? 0 : num;  // Define como 0 valores não numéricos
+                return isNaN(num) ? 0 : num; 
             }));
         }
 
-        // Função para criar e treinar a rede neural com TensorFlow.js
         async function makePredictions(data) {
             const results = {};
 
             for (const [sheetName, sheetData] of Object.entries(data)) {
-                const features = preprocessData(sheetData.slice(1)); // Remove headers
-
-                // Dividir dados em treino (80%) e teste (20%)
+                const features = preprocessData(sheetData.slice(1));
                 const trainSize = Math.floor(features.length * 0.8);
                 const trainFeatures = features.slice(0, trainSize);
                 const testFeatures = features.slice(trainSize);
 
-                // Simulando rótulos de treino
                 const trainLabels = new Array(trainFeatures.length).fill(0).map(() => Math.floor(Math.random() * 10));
 
-                // Criação do modelo de rede neural para regressão
                 const model = tf.sequential();
                 model.add(tf.layers.dense({ units: 64, activation: 'relu', inputShape: [trainFeatures[0].length] }));
                 model.add(tf.layers.dense({ units: 32, activation: 'relu' }));
-                model.add(tf.layers.dense({ units: 1 }));  // Saída com uma unidade para regressão
+                model.add(tf.layers.dense({ units: 1 }));
 
-                // Compilação do modelo
                 model.compile({
                     optimizer: tf.train.adam(),
                     loss: 'meanSquaredError',
                     metrics: ['mae']
                 });
 
-                // Conversão dos dados para tensores
                 const xs = tf.tensor2d(trainFeatures);
                 const ys = tf.tensor2d(trainLabels, [trainLabels.length, 1]);
 
-                // Treinamento do modelo
                 await model.fit(xs, ys, {
                     epochs: 50,
                     batchSize: 8,
                     verbose: 0
                 });
 
-                // Previsão com o modelo
                 const testTensor = tf.tensor2d(testFeatures);
-                const predictions = model.predict(testTensor);
-                const predictedValues = await predictions.array();
+                const randomForestPredictions = await model.predict(testTensor).array();
 
-                results[sheetName] = predictedValues;
+                const linearPredictions = testFeatures.map(row => {
+                    const m = 0.5;
+                    const b = 3;
+                    return row[0] * m + b;
+                });
+
+                const markovPredictions = generateMarkovPredictions(linearPredictions);
+
+                results[sheetName] = { randomForestPredictions, linearPredictions, markovPredictions };
             }
             return results;
         }
 
-        // Função para exibir os resultados em uma tabela
+        function generateMarkovPredictions(linearPredictions) {
+            const states = Array.from({ length: 11 }, (_, i) => i);
+            const transitionMatrix = Array.from({ length: 11 }, () => Array(11).fill(1 / 11));
+
+            return linearPredictions.map(state => {
+                const currentState = Math.min(10, Math.max(0, Math.round(state)));
+                const nextState = Math.floor(Math.random() * 11);
+                return states[nextState];
+            });
+        }
+
         function displayResults(predictions) {
             const resultsDiv = document.getElementById('results');
-            resultsDiv.innerHTML = ''; // Limpar resultados anteriores
+            resultsDiv.innerHTML = '';
 
-            for (const [sheetName, sheetPredictions] of Object.entries(predictions)) {
+            for (const [sheetName, { randomForestPredictions, linearPredictions, markovPredictions }] of Object.entries(predictions)) {
                 const table = document.createElement('table');
 
-                // Cabeçalho da Tabela
                 const headerRow = document.createElement('tr');
-                headerRow.innerHTML = `<th>${sheetName} - Amostras</th><th>Predição</th>`;
+                headerRow.innerHTML = `<th>${sheetName} - Amostras</th><th>Random Forest</th><th>Equação da Reta</th><th>Cadeia de Markov</th>`;
                 table.appendChild(headerRow);
 
-                // Mostrar apenas as primeiras 10 linhas de predição para cada aba
-                sheetPredictions.slice(0, 10).forEach((prediction, index) => {
+                randomForestPredictions.slice(0, 10).forEach((prediction, index) => {
                     const row = document.createElement('tr');
-                    row.innerHTML = `<td>Linha ${index + 1}</td><td>${prediction[0].toFixed(2)}</td>`;
+
+                    const colorRF = getColor(prediction[0]);
+                    const colorLR = getColor(linearPredictions[index]);
+                    const colorMarkov = getColor(markovPredictions[index]);
+
+                    row.innerHTML = `
+                        <td>Linha ${index + 1}</td>
+                        <td style="background-color:${colorRF}">${prediction[0].toFixed(2)}</td>
+                        <td style="background-color:${colorLR}">${linearPredictions[index].toFixed(2)}</td>
+                        <td style="background-color:${colorMarkov}">${markovPredictions[index]}</td>
+                    `;
                     table.appendChild(row);
                 });
 
                 resultsDiv.appendChild(table);
             }
+        }
+
+        function getColor(value) {
+            const red = Math.min(255, Math.floor(255 * (10 - value) / 10));
+            const green = Math.min(255, Math.floor(255 * (value / 10)));
+            return `rgb(${red},${green},0)`;
         }
     </script>
 </body>

@@ -80,20 +80,30 @@
         document.getElementById('fileInput').addEventListener('change', handleFileUpload);
 
         async function handleFileUpload(event) {
+            console.log("Arquivo carregado, iniciando leitura do Excel...");
             const file = event.target.files[0];
             const data = await readExcel(file);
+            console.log("Excel lido com sucesso, normalizando dados...");
+
             const normalizedData = normalizeSheetsData(data);
+            console.log("Dados normalizados, iniciando previsão...");
+
             const predictions = await makePredictions(normalizedData);
+            console.log("Previsões concluídas, exibindo resultados...");
+
             displayResults(predictions);
         }
 
         async function readExcel(file) {
+            console.log("Lendo arquivo Excel...");
             const reader = new FileReader();
             return new Promise((resolve) => {
                 reader.onload = (event) => {
+                    console.log("Arquivo Excel processado, convertendo dados...");
                     const workbook = XLSX.read(event.target.result, { type: 'binary' });
                     const sheetsData = {};
 
+                    // Percorre todas as planilhas no arquivo Excel
                     workbook.SheetNames.forEach(sheetName => {
                         const sheet = workbook.Sheets[sheetName];
                         sheetsData[sheetName] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
@@ -106,15 +116,20 @@
         }
 
         function normalizeSheetsData(sheetsData) {
+            console.log("Normalizando dados das planilhas...");
             const normalizedData = {};
 
+            // Normaliza os dados de cada planilha
             for (const [sheetName, sheetData] of Object.entries(sheetsData)) {
                 const numericData = preprocessData(sheetData.slice(1));
+
+                // Calcula os valores mínimos e máximos para cada coluna
                 const minMax = numericData[0].map((_, colIndex) => {
                     const colValues = numericData.map(row => row[colIndex]);
                     return { min: Math.min(...colValues), max: Math.max(...colValues) };
                 });
 
+                // Aplica normalização Min-Max nos dados
                 normalizedData[sheetName] = numericData.map(row =>
                     row.map((value, colIndex) => {
                         const { min, max } = minMax[colIndex];
@@ -127,6 +142,8 @@
         }
 
         function preprocessData(data) {
+            console.log("Pré-processando os dados...");
+            // Converte os dados para números e substitui NaN por 0
             return data.map(row => row.slice(0, 11).map(value => {
                 const num = parseFloat(value);
                 return isNaN(num) ? 0 : num; 
@@ -134,15 +151,19 @@
         }
 
         async function makePredictions(data) {
+            console.log("Criando modelo e iniciando treinamento...");
             const results = {};
 
+            // Percorre os dados normalizados para treinar e prever para cada planilha
             for (const [sheetName, sheetData] of Object.entries(data)) {
                 const trainSize = Math.floor(sheetData.length * 0.8);
                 const trainFeatures = sheetData.slice(0, trainSize);
                 const testFeatures = sheetData.slice(trainSize);
 
+                // Gera rótulos de treinamento fictícios
                 const trainLabels = new Array(trainFeatures.length).fill(0).map(() => Math.floor(Math.random() * 10));
 
+                // Cria o modelo de rede neural
                 const model = tf.sequential();
                 model.add(tf.layers.dense({ units: 64, activation: 'relu', inputShape: [trainFeatures[0].length] }));
                 model.add(tf.layers.dense({ units: 32, activation: 'relu' }));
@@ -154,24 +175,30 @@
                     metrics: ['mae']
                 });
 
+                // Converte os dados para tensores
                 const xs = tf.tensor2d(trainFeatures);
                 const ys = tf.tensor2d(trainLabels, [trainLabels.length, 1]);
 
+                // Treina o modelo
                 await model.fit(xs, ys, {
                     epochs: 50,
                     batchSize: 8,
                     verbose: 0
                 });
+                console.log(`Treinamento do modelo para ${sheetName} concluído.`);
 
+                // Faz previsões
                 const testTensor = tf.tensor2d(testFeatures);
                 const randomForestPredictions = await model.predict(testTensor).array();
 
+                // Cria previsões usando uma equação linear
                 const linearPredictions = testFeatures.map(row => {
                     const m = 0.5;
                     const b = 3;
                     return row[0] * m + b;
                 });
 
+                // Gera previsões usando uma cadeia de Markov
                 const markovPredictions = generateMarkovPredictions(linearPredictions);
 
                 results[sheetName] = { randomForestPredictions, linearPredictions, markovPredictions };
@@ -180,9 +207,11 @@
         }
 
         function generateMarkovPredictions(linearPredictions) {
+            console.log("Gerando previsões com Cadeia de Markov...");
             const states = Array.from({ length: 11 }, (_, i) => i);
             const transitionMatrix = Array.from({ length: 11 }, () => Array(11).fill(1 / 11));
 
+            // Simula a cadeia de Markov
             return linearPredictions.map(state => {
                 const currentState = Math.min(10, Math.max(0, Math.round(state)));
                 const nextState = Math.floor(Math.random() * 11);
@@ -191,9 +220,11 @@
         }
 
         function displayResults(predictions) {
+            console.log("Exibindo resultados na página...");
             const resultsDiv = document.getElementById('results');
             resultsDiv.innerHTML = '';
 
+            // Cria uma tabela para cada conjunto de previsões
             for (const [sheetName, { randomForestPredictions, linearPredictions, markovPredictions }] of Object.entries(predictions)) {
                 const table = document.createElement('table');
 
@@ -201,6 +232,7 @@
                 headerRow.innerHTML = `<th>${sheetName} - Amostras</th><th>Random Forest</th><th>Equação da Reta</th><th>Cadeia de Markov</th>`;
                 table.appendChild(headerRow);
 
+                // Adiciona as linhas de dados à tabela
                 randomForestPredictions.slice(0, 10).forEach((prediction, index) => {
                     const row = document.createElement('tr');
 
@@ -212,7 +244,7 @@
                         <td>Linha ${index + 1}</td>
                         <td style="background-color:${colorRF}">${prediction[0].toFixed(2)}</td>
                         <td style="background-color:${colorLR}">${linearPredictions[index].toFixed(2)}</td>
-                        <td style="background-color:${colorMarkov}">${markovPredictions[index]}</td>
+                        <td style="background-color:${colorMarkov}">${markovPredictions[index].toFixed(2)}</td>
                     `;
                     table.appendChild(row);
                 });
@@ -222,7 +254,8 @@
         }
 
         function getColor(value) {
-            const red = Math.min(255, Math.floor(255 * (10 - value) / 10));
+            // Define uma cor baseada no valor (0-10)
+            const red = Math.min(255, Math.floor(255 * (1 - value / 10)));
             const green = Math.min(255, Math.floor(255 * (value / 10)));
             return `rgb(${red},${green},0)`;
         }
